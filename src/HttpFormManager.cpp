@@ -139,7 +139,9 @@ void HttpFormManager::cancelCurrentFormSubmission(){
 		int n = q.size();
 		if ( isThreadRunning() && n > 0 ){			
 			HttpFormResponse * r = q.front();
-			if (debug) printf( "HttpFormManager::cancelCurrentForm() >> about to stop form submission of %s...\n", r->url.c_str() );
+			if (debug) {
+				ofLogVerbose("HttpFormManager::cancelCurrentForm() about to stop form submission of", r->url.c_str());
+			}
 			try{
 				r->submissionCanceled = true;
 				if ( r->session->connected() ) {
@@ -247,11 +249,16 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 			delete form2;
 			delete form;
 			//throw("Exception");
+			resp->ok = false;
+			resp->status = 499;
+			ofNotifyEvent( formResponseEvent, *resp, this );
 			return false;
 		}
 
 		if (resp->submissionCanceled){	
-			if(debug) printf("HttpFormManager::executeForm() >> form submission (%s) canceled!\n", resp->action.c_str() );
+			if(debug) {
+				ofLogVerbose("HttpFormManager executeForm() form submission canceled", resp->action.c_str());
+			}
 			delete form2;
 			delete form;
 			return false;
@@ -263,6 +270,7 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 			std::string s = ostr2.str();
 			std::cout << "HttpFormManager:: HTMLRequest follows >>" << endl;
 			std::cout << s << endl;
+			ofLogVerbose("HttpFormManager", ostr2.str());
 		}
 				
 		HTTPResponse res;
@@ -274,14 +282,16 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 		resp->reasonForStatus = res.getReasonForStatus( res.getStatus() );
 		resp->contentType = res.getContentType();
 		
-		if (debug) printf("HttpFormManager::executeForm() >> server reports request staus: (%d-%s)\n", resp->status, resp->reasonForStatus.c_str() );
+		if (debug) {
+			ofLogVerbose("HttpFormManager executeForm() >> server reports request staus:", ofToString(resp->status) + " :: " + resp->reasonForStatus);
+		}
 		
 		delete form2;	//we might be leaking here if an exception rises before we get to this point! TODO! uri
 		delete form;
 
 		
 		if (timeToStop) {
-			printf("HttpFormManager::executeForm() >> time to stop! \n");
+			ofLogVerbose("HttpFormManager executeForm()", "time to stop!");
 			return false;
 		};
 		
@@ -294,15 +304,20 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 			return false;
 		}
 
-		if (debug) printf("HttpFormManager::executeForm() >> server response: \n\n######################## SERVER RESPONSE ########################\n\n%s\n#################################################################\n\n", resp->responseBody.c_str() );
-		printf("Successfully commited form %s!\n",  resp->action.c_str());
+		if (debug) {
+			ofLogVerbose("HttpFormManager executeForm() server response", resp->action.c_str());
+		}
 		
 		if (resp->submissionCanceled){
-			if(debug) printf("HttpFormManager::executeForm() >> submit (%s) canceled!\n", resp->action.c_str());
+			if(debug) {
+				ofLogVerbose("HttpFormManager::executeForm() submit canceled", resp->action.c_str());
+			}
 			return false;
 		}
 		
-		if(debug) printf("HttpFormManager::executeForm() >> submitted form! (%s)\n", resp->action.c_str());
+		if(debug) {
+			ofLogVerbose("HttpFormManager::executeForm() submitted form", resp->action.c_str());
+		}
 		
 		resp->ok = true;
 		
@@ -321,7 +336,9 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 
 void HttpFormManager::threadedFunction(){
 
-	if (debug) printf("\nHttpFormManager >> start threadedFunction\n");
+	if (debug) {
+		ofLogVerbose("HttpFormManager::executeForm()","start threaded function");
+	}
 	int pending = 0;
 	
 	lock();
@@ -342,10 +359,14 @@ void HttpFormManager::threadedFunction(){
 		unlock();
 	}
 	//if no more pending requests, let the thread die...
-	if (debug) printf("HttpFormManager >> exiting threadedFunction (queue %d)\n",  (int)q.size());
+	if (debug) {
+		ofLogVerbose("HttpFormManager exiting threaded function", "queue" + ofToString(q.size()));
+	}
 	
 	if (!timeToStop){
-		if (debug) printf("detaching HttpFormManager thread!\n");
+		if (debug) {
+			ofLogVerbose("HttpFormManager", "detaching thread");
+		}
 #ifdef TARGET_OSX
 		pthread_detach(pthread_self());
 #endif
