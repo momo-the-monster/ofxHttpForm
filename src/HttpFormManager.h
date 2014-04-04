@@ -40,6 +40,7 @@ struct HttpFormResponse{
 	vector <string>				formIds;
 	vector <string>				formValues;
 	std::map<string, FormContent> formFiles;
+	string						jsonData;
 
 	//more detailed response info & session
 	bool						ignoreReply;
@@ -77,6 +78,7 @@ class HttpFormManager : public ofThread{
 		void setVerbose(bool verbose);
 		void setUserAgent( string newUserAgent );
 		void setAcceptString( string newAcceptString );
+		void setCSRFToken( string token );
 		
 		ofEvent<HttpFormResponse> formResponseEvent;
 	
@@ -96,6 +98,8 @@ class HttpFormManager : public ofThread{
 		string							acceptString;
 		queue<HttpFormResponse*>		q;		//the pending forms
 		bool							timeToStop;
+		string							token;
+		vector<Poco::Net::HTTPCookie>	cookies;
 
 	
 };

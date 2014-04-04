@@ -31,6 +31,7 @@ HttpFormManager::HttpFormManager(){
 	timeToStop = false;
 	userAgent = "HttpFormManager (Poco Powered)";
 	acceptString = "";
+	token = "";
 }
 
 HttpFormManager::~HttpFormManager(){
@@ -70,6 +71,10 @@ void HttpFormManager::setAcceptString( string newAcceptString ){
 	acceptString = newAcceptString;
 }
 
+void HttpFormManager::setCSRFToken( string newToken ) {
+	token = newToken;
+}
+
 
 void HttpFormManager::draw(int x, int y){
 	
@@ -95,6 +100,7 @@ HttpFormResponse* HttpFormManager::createFormRespPtrFromForm( HttpForm f ){
 	form->formIds = f.formIds;
 	form->formValues = f.formValues;
 	form->formFiles = f.formFiles;
+	form->jsonData = f.jsonData;
 	return form;
 }
 
@@ -167,10 +173,11 @@ HTMLForm* HttpFormManager::createPocoFormFrom( HttpFormResponse * resp ){
 	
 	HTMLForm *form = new HTMLForm();
 	
-	if( resp->formFiles.size() > 0 )
+	if( resp->formFiles.size() > 0 ) {
 		form->setEncoding(HTMLForm::ENCODING_MULTIPART);
-	else
+	} else {
 		form->setEncoding(HTMLForm::ENCODING_URL);
+	}
 					
 	// form values
 	for( unsigned i = 0; i < resp->formIds.size(); i++ ){
@@ -195,9 +202,16 @@ HTMLForm* HttpFormManager::createPocoFormFrom( HttpFormResponse * resp ){
 	return form;
 }
 
-bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroughEvents ){  
+bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroughEvents ){
 
 	try{
+
+		bool jsonMode = (resp->jsonData.length() > 0);
+
+		// Used if sending Forms instead of JSON
+		// Created here for scope reasons
+		HTMLForm *form;
+		HTMLForm *form2;
 
 		Poco::URI uri( resp->url );
 		std::string path(uri.getPathAndQuery());
@@ -205,7 +219,7 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 		resp->action = path;
 
 		HTTPClientSession session(uri.getHost(), uri.getPort());
-		HTTPRequest req(HTTPRequest::HTTP_POST, path, HTTPMessage::HTTP_1_1);		
+		HTTPRequest req(HTTPRequest::HTTP_POST, path, HTTPMessage::HTTP_1_1);
 		resp->session = &session;
 		
 		session.setTimeout( Poco::Timespan(timeOut,0) );
@@ -215,52 +229,91 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 			req.set( "Accept", acceptString.c_str() );
 		}
 
-		//auth, todo later?
-		//	Poco::Net::HTTPBasicCredentials cred(_username, _password);
-		//	cred.authenticate(req);
-
-		//long story short of why we fill in two forms:
-		//we need to specify exact lenght of the data in the form (file s headers), but we can't really measure it untill its been sent
-		//so we create 2 indetical forms, one just to measure its size, other to use for sending thorugh the request
-		HTMLForm *form = createPocoFormFrom(resp);
-		if (form == NULL) return false;
-		HTMLForm *form2 = createPocoFormFrom(resp);
-					
-		form->prepareSubmit(req);
-		form2->prepareSubmit(req);
-		
-		req.setChunkedTransferEncoding(false);
-		//req.setKeepAlive(true);
-		//req.set("Accept" , "*/*" );
-		//req.set("Origin", "http://" + uri.getHost() + ":" + ofToString(uri.getPort()) );
-		//req.set("Host",  uri.getHost() + ":" + ofToString(uri.getPort()) );
-
-		//lets find out the length of the total data we are sending and report it				
-		std::ostringstream formDumpContainer;
-		form2->write(formDumpContainer);
-		req.setContentLength( formDumpContainer.str().length() );	//finally we can specify exact content length in the request
-
-		try{
-			//send the form data through the http session
-			 std::ostream & ostr = session.sendRequest(req);
-			form->write( ostr );
-		}catch(Exception& exc){
-			ofLog( OF_LOG_ERROR, "HttpFormManager::executeForm(%s) >> Exception while sending form \n", resp->action.c_str() );
-			delete form2;
-			delete form;
-			//throw("Exception");
-			resp->ok = false;
-			resp->status = 499;
-			ofNotifyEvent( formResponseEvent, *resp, this );
-			return false;
+		// Set CSRF Token
+		if( token.length() > 0) {
+			req.set( "X-CSRF-Token", token.c_str() );
 		}
+
+		// Set Cookies
+		if( cookies.size() > 0) {
+			Poco::Net::NameValueCollection the_cookies;
+
+			for (auto &cookie : cookies) {
+			 the_cookies.add( cookie.getName(), cookie.getValue() );
+			}
+
+			req.setCookies( the_cookies );
+		}
+
+		if(resp->jsonData.length() > 0) {
+
+			// Sending JSON Data
+			req.setContentType("application/json");
+			req.setKeepAlive(true);
+
+			std::string reqBody(resp->jsonData);
+			req.setContentLength( reqBody.length() );
+			
+			session.sendRequest(req) << reqBody;
+
+		} else {
+
+			// Sending Form Data
+
+			//auth, todo later?
+			//	Poco::Net::HTTPBasicCredentials cred(_username, _password);
+			//	cred.authenticate(req);
+
+			//long story short of why we fill in two forms:
+			//we need to specify exact lenght of the data in the form (file s headers), but we can't really measure it untill its been sent
+			//so we create 2 indetical forms, one just to measure its size, other to use for sending thorugh the request
+			form = createPocoFormFrom(resp);
+			if (form == NULL) return false;
+			form2 = createPocoFormFrom(resp);
+					
+			form->prepareSubmit(req);
+			form2->prepareSubmit(req);
+		
+			req.setChunkedTransferEncoding(false);
+			//req.setKeepAlive(true);
+			//req.set("Accept" , "*/*" );
+			//req.set("Origin", "http://" + uri.getHost() + ":" + ofToString(uri.getPort()) );
+			//req.set("Host",  uri.getHost() + ":" + ofToString(uri.getPort()) );
+
+			//lets find out the length of the total data we are sending and report it				
+			std::ostringstream formDumpContainer;
+			form2->write(formDumpContainer);
+			req.setContentLength( formDumpContainer.str().length() );	//finally we can specify exact content length in the request
+
+			try {
+
+				//send the form data through the http session
+				std::ostream & ostr = session.sendRequest(req);
+				form->write( ostr );
+
+			} catch( Exception& exc ){
+
+				ofLog( OF_LOG_ERROR, "HttpFormManager::executeForm(%s) >> Exception while sending form \n", resp->action.c_str() );
+				delete form2;
+				delete form;
+				//throw("Exception");
+				resp->ok = false;
+				resp->status = 499;
+				ofNotifyEvent( formResponseEvent, *resp, this );
+				return false;
+			}
+
+		} // end form send
 
 		if (resp->submissionCanceled){	
 			if(debug) {
 				ofLogVerbose("HttpFormManager executeForm() form submission canceled", resp->action.c_str());
 			}
-			delete form2;
-			delete form;
+			if (!jsonMode) {
+				delete form2;
+				delete form;
+			}
+
 			return false;
 		}
 
@@ -281,14 +334,21 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 		resp->timestamp = res.getDate();
 		resp->reasonForStatus = res.getReasonForStatus( res.getStatus() );
 		resp->contentType = res.getContentType();
-		
-		if (debug) {
-			ofLogVerbose("HttpFormManager executeForm() >> server reports request staus:", ofToString(resp->status) + " :: " + resp->reasonForStatus);
+
+		vector<Poco::Net::HTTPCookie> newCookies;
+		res.getCookies( newCookies );
+		for( auto &cookie : newCookies) {
+			cookies.push_back( cookie );
 		}
 		
-		delete form2;	//we might be leaking here if an exception rises before we get to this point! TODO! uri
-		delete form;
-
+		if (debug) {
+			ofLogVerbose("HttpFormManager executeForm() >> server reports request status:", ofToString(resp->status) + " :: " + resp->reasonForStatus);
+		}
+			
+			if (!jsonMode) {
+					delete form2; //we might be leaking here if an exception rises before we get to this point! TODO! uri
+					delete form;
+			}
 		
 		if (timeToStop) {
 			ofLogVerbose("HttpFormManager executeForm()", "time to stop!");
@@ -299,8 +359,10 @@ bool HttpFormManager::executeForm( HttpFormResponse* resp, bool sendResultThroug
 			StreamCopier::copyToString(rs, resp->responseBody);	//copy the data...		
 		}catch(Exception& exc){
 			ofLog( OF_LOG_ERROR, "HttpFormManager::executeForm(%s) >> Exception while copyToString: %s\n", resp->action.c_str(), exc.displayText().c_str() );
-			delete form2;	//we might be leaking here if an exception rises before we get to this point! TODO! uri
-			delete form;
+			if (!jsonMode) {
+				delete form2; //we might be leaking here if an exception rises before we get to this point! TODO! uri
+				delete form;
+			}
 			return false;
 		}
 

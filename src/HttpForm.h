@@ -31,6 +31,10 @@ struct HttpForm{
 			formIds.push_back( ID );
 			formValues.push_back( value );
 		}
+
+		void addJson( string data ) {
+			jsonData = data;
+		}
 		
 		void clearFormFields(){
 			formIds.clear();
@@ -53,6 +57,7 @@ struct HttpForm{
 		}
 
 		string url;
+		string jsonData;
 		vector <string> formIds;
 		vector <string> formValues;
 		std::map< string, FormContent >formFiles;
